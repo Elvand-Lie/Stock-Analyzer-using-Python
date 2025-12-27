@@ -1,0 +1,6 @@
+@echo off
+echo Installing requirements...
+pip install -r requirements.txt
+echo Starting Stock Analyzer...
+streamlit run stock_agent.py
+pause
