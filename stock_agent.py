@@ -1,4 +1,4 @@
-import time
+import os
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -7,20 +7,35 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from openai import OpenAI
 from duckduckgo_search import DDGS
+from dotenv import load_dotenv
 
 # --- Configuration ---
+load_dotenv() # Load variables from .env if present
 MODEL_ID = "tngtech/deepseek-r1t2-chimera:free"
 
-# [CHANGED] Try to load key from Streamlit Secrets
-try:
-    API_KEY = st.secrets["OPENROUTER_API_KEY"]
-except FileNotFoundError:
-    API_KEY = None
-    # Use a placeholder or handle the error gracefully if running locally without the file
-except KeyError:
-    API_KEY = None
+# --- Helper: Smart Key Loader ---
+def get_api_key():
+    """
+    Tries to find the API key in this order:
+    1. Streamlit Secrets (.streamlit/secrets.toml)
+    2. Environment Variables (.env)
+    3. Returns None if not found (triggers manual input)
+    """
+    # Check Streamlit Secrets
+    try:
+        if "OPENROUTER_API_KEY" in st.secrets:
+            return st.secrets["OPENROUTER_API_KEY"], "Secrets File"
+    except FileNotFoundError:
+        pass # No secrets file found, continue
+        
+    # Check OS Environment (.env)
+    env_key = os.getenv("OPENROUTER_API_KEY")
+    if env_key:
+        return env_key, "Environment (.env)"
+        
+    return None, None
 
-# --- Technical Analysis Functions (Same as before) ---
+# --- Technical Analysis Functions ---
 def calculate_rsi(df, window=14):
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
@@ -58,10 +73,9 @@ def get_stock_data(ticker, period="1y"):
         return None, str(e)
 
 # --- DeepSeek AI Analysis ---
-def get_deepseek_analysis(ticker, df):
-    # [CHANGED] Uses the global API_KEY retrieved from st.secrets
-    if not API_KEY:
-        return "⚠️ API Key missing. Please set OPENROUTER_API_KEY in .streamlit/secrets.toml"
+def get_deepseek_analysis(ticker, df, api_key):
+    if not api_key:
+        return "⚠️ Please enter an API Key to see the report."
 
     news_summary = ""
     try:
@@ -95,7 +109,7 @@ def get_deepseek_analysis(ticker, df):
     try:
         client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=API_KEY, 
+            api_key=api_key, 
         )
         response = client.chat.completions.create(
             model=MODEL_ID,
@@ -114,11 +128,17 @@ def main():
     with st.sidebar:
         st.header("Settings")
         
-        # [CHANGED] Check if secrets loaded successfully
-        if API_KEY:
-            st.success("✅ API Key Loaded from Secrets")
+        # [LOGIC FIX] 1. Try to load key automatically
+        api_key, source = get_api_key()
+        
+        # 2. If found, show success message
+        if api_key:
+            st.success(f"✅ Key Loaded from {source}")
+            
+        # 3. If NOT found, show the manual input box
         else:
-            st.error("❌ Key Missing (.streamlit/secrets.toml)")
+            st.warning("No .env or secrets found.")
+            api_key = st.text_input("OpenRouter API Key", type="password")
             
         ticker = st.text_input("Ticker", value="NVDA").upper()
         if st.button("Analyze"):
@@ -139,11 +159,11 @@ def main():
 
             # AI Report
             st.subheader("🧠 DeepSeek Analysis")
-            if API_KEY:
+            if api_key:
                 with st.spinner("Analyzing..."):
-                    st.markdown(get_deepseek_analysis(ticker, df))
+                    st.markdown(get_deepseek_analysis(ticker, df, api_key))
             else:
-                st.warning("Configure secrets.toml to see AI analysis.")
+                st.warning("⚠️ Enter API Key in sidebar to see the AI report.")
 
 if __name__ == "__main__":
     main()
