@@ -6,16 +6,11 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from dotenv import load_dotenv
 from openai import OpenAI
 from duckduckgo_search import DDGS
 
-# Load environment variables
-load_dotenv()
-
 # --- Configuration ---
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-MODEL_ID = "deepseek/deepseek-r1-0528"
+MODEL_ID = "tngtech/deepseek-r1t2-chimera:free"
 
 # --- Technical Analysis Functions (Raw Pandas) ---
 
@@ -83,16 +78,20 @@ def get_news_summary(ticker):
         return f"Error fetching news: {str(e)}"
 
 def get_deepseek_analysis(ticker, df, api_key):
-    if not OPENROUTER_API_KEY:
-        return "⚠️ OPENROUTER_API_KEY not found in .env file."
+    # Logic Fix: Use the passed api_key argument, not a global variable
+    if not api_key:
+        return "⚠️ Please enter an OpenRouter API Key in the sidebar to generate the report."
 
     # 1. Search Grounding (DuckDuckGo)
     news_summary = ""
     try:
         with st.spinner(f"Searching news for {ticker}..."):
             results = DDGS().text(f"{ticker} stock news analysis finance", max_results=3)
-            for r in results:
-                news_summary += f"- {r['title']}: {r['body']}\n"
+            if results:
+                for r in results:
+                    news_summary += f"- {r['title']}: {r['body']}\n"
+            else:
+                news_summary = "No immediate news found."
     except Exception as e:
         news_summary = f"Could not fetch news: {e}"
 
@@ -120,18 +119,16 @@ def get_deepseek_analysis(ticker, df, api_key):
     """
 
     try:
-        # Connect to OpenRouter
+        # Connect to OpenRouter using the user-provided key
         client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY,
+            api_key=api_key, 
         )
 
         response = client.chat.completions.create(
             model=MODEL_ID,
             messages=[{"role": "user", "content": prompt}],
-            # --- THE FIX IS HERE ---
-            max_tokens=3000,  # Limits the "cost" reservation to ~3k tokens instead of 65k
-            # -----------------------
+            max_tokens=3000,
             extra_headers={
                 "HTTP-Referer": "https://localhost:8501", 
                 "X-Title": "StockAnalyzer"
@@ -153,10 +150,11 @@ def main():
     with st.sidebar:
         st.header("Settings")
         
-        # API Key Handling
-        api_key = st.text_input("OpenRouter API Key", value=OPENROUTER_API_KEY if OPENROUTER_API_KEY else "", type="password")
+        # API Key Handling (User Input Only)
+        api_key = st.text_input("OpenRouter API Key", type="password", help="Get your free key at openrouter.ai")
+        
         if not api_key:
-            st.warning("Please enter your OpenRouter API Key to use the AI features.")
+            st.warning("Enter API Key to enable AI Report")
             
         ticker = st.text_input("Ticker Symbol", value="NVDA").upper()
         period = st.selectbox("Period", ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"], index=3)
@@ -194,8 +192,7 @@ def main():
             fig.add_trace(go.Bar(x=df.index, y=df['Hist'], name='Histogram'), row=2, col=1)
             
             fig.update_layout(height=800, xaxis_rangeslider_visible=False)
-            # using width="stretch" as per deprecation warning for use_container_width
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, width=None, use_container_width=True)
 
             # 2. DeepSeek Intelligence Report
             st.subheader("🧠 DeepSeek R1 Intelligence Report")
@@ -205,7 +202,7 @@ def main():
                     analysis = get_deepseek_analysis(ticker, df, api_key)
                 st.markdown(analysis)
             else:
-                st.error("Please provide an OpenRouter API Key to generate the report.")
+                st.info("ℹ️ Enter an OpenRouter API Key in the sidebar to generate the AI analysis.")
             
             # 3. Raw Data (Optional)
             with st.expander("View Raw Data"):
